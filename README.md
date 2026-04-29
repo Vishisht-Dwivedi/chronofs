@@ -1,2 +1,2 @@
 # chronofs
-A simple version tracking system inspired by git, built in C.
+A simple file tracking system with activity logging and checkpointed state, inspired by git.
