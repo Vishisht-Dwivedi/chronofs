@@ -33,14 +33,13 @@ struct chronofs_data {
     int inotify_fd;
     FILE *log_file;
     char root[MAX_PATH_LENGTH];
+    int wd_top;
+    int wd_arr_size;
 };
-// resizable array size
-int wd_arr_size = 128;
-int wd_top = 0;
 // utility to copy array... making a new array twice the size and returning ptr to it..
-struct wd_map* wd_map_extend(struct wd_map *arr);
+int wd_map_extend(struct chronofs_data *data);
 //recurse through all directories and attach listeners
-int dfs(char *base_dir, struct wd_map **map, int fd);
+int dfs(struct chronofs_data *data, char *curr_dir);
 
 //init func
 struct chronofs_data* init(char *watch_dir);
@@ -90,7 +89,7 @@ int main(int argc, char *argv[])
                     if(event->mask & IN_ISDIR)
                     {
                         //find parent wd
-                        for (int j = 0; j < wd_top; j++)
+                        for (int j = 0; j < global_data->wd_top; j++)
                         {
                             if(global_data->wd_map[j].wd == event->wd){
                                 char new_dir_path[MAX_PATH_LENGTH];
@@ -114,16 +113,15 @@ int main(int argc, char *argv[])
                                 strcpy(new_dir.path, new_dir_path);
 
                                 // resize if needed
-                                if(wd_top == wd_arr_size)
+                                if(global_data->wd_top == global_data->wd_arr_size)
                                 {
-                                    global_data->wd_map = wd_map_extend(global_data->wd_map);
-                                    if(global_data->wd_map == NULL)
+                                    if(wd_map_extend(global_data) == -1)
                                     {
                                         perror("Error while allocating new memory to map within dynamic wd allocation\n");
                                         return -1;
                                     }
                                 }
-                                global_data->wd_map[wd_top++] = new_dir;
+                                global_data->wd_map[global_data->wd_top++] = new_dir;
                                 break;
                             }
                         }
@@ -137,7 +135,7 @@ int main(int argc, char *argv[])
                     //if directory delete
                     if(event->mask & IN_ISDIR){
                         //find parent wd
-                        for (int j = 0; j < wd_top; j++)
+                        for (int j = 0; j < global_data->wd_top; j++)
                         {
                             if (global_data->wd_map[j].wd == event->wd)
                             {
@@ -153,14 +151,14 @@ int main(int argc, char *argv[])
                                 //get deleted child's path
                                 strcat(deleted_path, event->name);
                                 //find child descriptor and remove it from watch list
-                                for (int k = 0; k < wd_top; k++)
+                                for (int k = 0; k < global_data->wd_top; k++)
                                 {
                                     if(strcmp(global_data->wd_map[k].path, deleted_path) == 0)
                                     {
                                         inotify_rm_watch(global_data->inotify_fd, global_data->wd_map[k].wd);
                                         global_data->wd_map[k].active = false;
-                                        global_data->wd_map[k] = global_data->wd_map[wd_top - 1];
-                                        wd_top--;
+                                        global_data->wd_map[k] = global_data->wd_map[global_data->wd_top - 1];
+                                        global_data->wd_top--;
                                         break;
                                     }
                                 }
@@ -192,30 +190,31 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-struct wd_map* wd_map_extend(struct wd_map *arr) {
-    int newN = wd_arr_size * 2;
+int wd_map_extend(struct chronofs_data *data) {
+    int newN = data->wd_arr_size * 2;
     struct wd_map *newArr = calloc(newN, sizeof(struct wd_map));
     if(newArr == NULL){
         perror("Error while allocating memory during array extension\n");
-        return NULL;
+        return -1;
     }
     int j = 0;
-    wd_top = 0;
-    for (int i = 0; i < wd_arr_size; i++)
+    data->wd_top = 0;
+    for (int i = 0; i < data->wd_arr_size; i++)
     {
-        if(arr[i].active){
-            newArr[j++] = arr[i];
-            wd_top++;
+        if(data->wd_map[i].active){
+            newArr[j++] = data->wd_map[i];
+            data->wd_top++;
         }
     }
-    wd_arr_size = newN;
-    free(arr);
-    return newArr;
+    data->wd_arr_size = newN;
+    free(data->wd_map);
+    data->wd_map = newArr;
+    return 0;
 }
 
-int dfs(char *base_dir, struct wd_map **map, int fd) {
+int dfs(struct chronofs_data *data, char *curr_dir) {
     //open directory
-    DIR *dirp = opendir(base_dir);
+    DIR *dirp = opendir(curr_dir);
     if (dirp == NULL)
         return 0;
     //struct to handle entries
@@ -231,7 +230,7 @@ int dfs(char *base_dir, struct wd_map **map, int fd) {
                 //path handling
                 char watch_dir[MAX_PATH_LENGTH];
 
-                strcpy(watch_dir, base_dir);
+                strcpy(watch_dir, curr_dir);
                 int last = strlen(watch_dir);
                 //if last path didnt have / add it
                 if (last > 0 && watch_dir[last - 1] != '/') {
@@ -241,7 +240,7 @@ int dfs(char *base_dir, struct wd_map **map, int fd) {
 
                 strcat(watch_dir, dir_entry->d_name);
                 // attach listener and gets its descriptor
-                int wd = inotify_add_watch(fd, watch_dir, IN_ALL_EVENTS);
+                int wd = inotify_add_watch(data->inotify_fd, watch_dir, IN_ALL_EVENTS);
                 if (wd < 0) {
                     perror("Error occured during add_watch");
                     closedir(dirp);
@@ -254,19 +253,19 @@ int dfs(char *base_dir, struct wd_map **map, int fd) {
                 strcpy(mp.path, watch_dir);
 
                 // resize if needed
-                if (wd_top == wd_arr_size) {
-                    struct wd_map *new_map = wd_map_extend(*map);
-                    if (new_map == NULL) {
+                if (data->wd_top == data->wd_arr_size) {
+                    if (wd_map_extend(data) == -1)
+                    {
                         closedir(dirp);
+                        perror("Error while allocating dynamic memory for extended array in dfs\n");
                         return -1;
                     }
-                    *map = new_map;
                 }
 
-                (*map)[wd_top++] = mp;
+                data->wd_map[data->wd_top++] = mp;
 
                 // recurse
-                if (dfs(watch_dir, map, fd) == -1) {
+                if (dfs(data, watch_dir) == -1) {
                     closedir(dirp);
                     return -1;
                 }
@@ -283,6 +282,8 @@ int dfs(char *base_dir, struct wd_map **map, int fd) {
 }
 struct chronofs_data* init(char *watch_dir){
     //assumed max path length
+    int wd_top = 0;
+    int wd_arr_size = 128;
     char cwd[MAX_PATH_LENGTH];
     //getting the directory from where the file was called
     if (getcwd(cwd, sizeof(cwd)) != NULL)
@@ -319,11 +320,6 @@ struct chronofs_data* init(char *watch_dir){
     map[wd_top].active = true;
     strcpy(map[wd_top].path, watch_dir);
     wd_top++;
-    // build recursive watchers
-    if (dfs(watch_dir, &map, fd) == -1) {
-        perror("DFS failed");
-        return NULL;
-    }
     //setting up a folder to track current logs within the working directory
     FILE *current_log_ptr = fopen("current.log", "a");
     if(current_log_ptr == NULL){
@@ -341,5 +337,12 @@ struct chronofs_data* init(char *watch_dir){
     global_data->log_file = current_log_ptr;
     strcpy(global_data->root, watch_dir);
     global_data->wd_map = map;
+    global_data->wd_top = wd_top;
+    global_data->wd_arr_size = wd_arr_size;
+    // build recursive watchers
+    if (dfs(global_data, global_data->root) == -1) {
+        perror("DFS failed");
+        return NULL;
+    }
     return global_data;
 }
