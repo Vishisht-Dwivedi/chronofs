@@ -92,7 +92,9 @@ int main()
     //set family to unix descriptors
     socket_addr.sun_family = AF_UNIX;
     strncpy(socket_addr.sun_path, SOCKET_NAME, sizeof(socket_addr.sun_path) - 1);
-    //binding call
+    //unlinking old unexited connections
+    unlink(SOCKET_NAME);
+    // binding call
     int ret = bind(socket_fd, (const struct sockaddr *)&socket_addr, sizeof(socket_addr));
     if(ret == -1){
         perror("Socket binding failure\n");
@@ -117,10 +119,17 @@ int main()
         while (true)
         {
             r = read(data_socket, &packet, sizeof(packet));
-            if(r == -1){
+            if(r == 0)
+            {
+                close(data_socket);
+                break;
+            } 
+            else if(r == -1)
+            {
                 perror("Error while reading from socket into buffer\n");
                 return -1;
             }
+            
             switch(packet.type)
             {
                 case WATCH:
