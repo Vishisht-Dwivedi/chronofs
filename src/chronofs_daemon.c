@@ -129,7 +129,7 @@ int main()
                 perror("Error while reading from socket into buffer\n");
                 return -1;
             }
-            
+
             switch(packet.type)
             {
                 case WATCH:
@@ -306,7 +306,16 @@ struct chronofs_data* init(char *watch_dir){
     strcpy(map[wd_top].path, watch_dir);
     wd_top++;
     //setting up a folder to track current logs within the working directory
-    FILE *current_log_ptr = fopen("current.log", "a");
+    char log_path[MAX_PATH_LENGTH];
+    strcpy(log_path, watch_dir);
+    int last = strlen(log_path);
+    if(last > 0 && log_path[last - 1] != '/')
+    {
+        log_path[last] = '/';
+        log_path[last + 1] = '\0';
+    }
+    strcat(log_path, "current.log");
+    FILE *current_log_ptr = fopen(log_path, "a");
     if(current_log_ptr == NULL){
         perror("Error while accessing log file\n");
         return NULL;
