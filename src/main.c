@@ -12,23 +12,27 @@
 #include <dirent.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <pthread.h>
 //define socket file
 #ifndef CONNECTION_H
 #define CONNECTION_H
 #define SOCKET_NAME "/tmp/chronofs.socket"
-#define SOCKET_BUFFER_SIZE 12
+#define SOCKET_BUFFER_SIZE 4096
 #endif
 
 #define MAX_PATH_LENGTH 4096
-
-//mapping wd to its directory.. used for storing listeners on multiple directories
-struct wd_map {
+int THREAD_ARRAY_SIZE = 10;
+int THREAD_ARRAY_TOP = 0;
+// mapping wd to its directory.. used for storing listeners on multiple directories
+struct wd_map 
+{
     int wd;
     char path[MAX_PATH_LENGTH];
     bool active;
 };
-//making a struct for handling all data abt execution
-struct chronofs_data {
+// execution structs
+struct chronofs_data 
+{
     struct wd_map *wd_map;
     int inotify_fd;
     FILE *log_file;
@@ -36,9 +40,26 @@ struct chronofs_data {
     int wd_top;
     int wd_arr_size;
 };
+struct watcher_thread {
+    pthread_t thread_id;
+    struct chronofs_data *data;
+    bool active;
+};
+enum request_type
+{
+    WATCH,
+    UNWATCH,
+    COMMIT
+};
+struct chronofs_packet
+{
+    int type;
+    char path[MAX_PATH_LENGTH];
+};
 // utility to copy array... making a new array twice the size and returning ptr to it..
 int wd_map_extend(struct chronofs_data *data);
-//recurse through all directories and attach listeners
+int thread_map_extend(struct watcher_thread **thread_array);
+// recurse through all directories and attach listeners
 int dfs(struct chronofs_data *data, char *curr_dir);
 
 //init func
@@ -53,23 +74,74 @@ int deleteEvent(struct chronofs_data *data, time_t now, struct inotify_event *ev
 int modifyEvent(struct chronofs_data *data, time_t now, struct inotify_event *event);
 int moveEvent(struct chronofs_data *data, time_t now, struct inotify_event *event);
 
-int main(int argc, char *argv[])
+// thread handler
+void *watcher_worker(void *arg);
+int main()
 {
-    // two args -> first to call binary.. second to pass path
-    if (argc != 2)
-    {
-        printf("usage: %s <directory-to-watch>\n", argv[0]);
+    struct watcher_thread *thread_array = calloc(THREAD_ARRAY_SIZE, sizeof(struct watcher_thread));
+    // local socket for ipc
+    int socket_fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
+    if(socket_fd == -1){
+        perror("Socket allocation failure\n");
         return -1;
     }
-    struct chronofs_data *global_data = init(argv[1]);
-    if (global_data == NULL)
-    {
-        perror("init failed\n");
+    //struct to handle socket location data
+    struct sockaddr_un socket_addr;
+    //remove unnecessary data from struct
+    memset(&socket_addr, 0, sizeof(socket_addr));
+    //set family to unix descriptors
+    socket_addr.sun_family = AF_UNIX;
+    strncpy(socket_addr.sun_path, SOCKET_NAME, sizeof(socket_addr.sun_path) - 1);
+    //binding call
+    int ret = bind(socket_fd, (const struct sockaddr *)&socket_addr, sizeof(socket_addr));
+    if(ret == -1){
+        perror("Socket binding failure\n");
         return -1;
     }
-    //event control
-    if(eventController(global_data) == -1)
+    //listen for data on the socket with a queue of 20...
+    ret = listen(socket_fd, 20);
+    if(ret == -1){
+        perror("Socket listening failure\n");
         return -1;
+    }
+    int data_socket;
+    ssize_t r;
+    while (true)
+    {
+        data_socket = accept(socket_fd, NULL, NULL);
+        if(data_socket == -1) {
+            perror("Failure while socket allocation on accept\n");
+            return -1;
+        }
+        struct chronofs_packet packet;
+        while (true)
+        {
+            r = read(data_socket, &packet, sizeof(packet));
+            if(r == -1){
+                perror("Error while reading from socket into buffer\n");
+                return -1;
+            }
+            switch(packet.type)
+            {
+                case WATCH:
+                    struct watcher_thread thread_data;
+                    thread_data.active = true;
+                    thread_data.data = init(packet.path);
+                    if(thread_data.data == NULL)
+                    {
+                        perror("init failed\n");
+                        return -1;
+                    }
+                    pthread_create(&thread_data.thread_id, NULL, watcher_worker, thread_data.data);
+                    if(THREAD_ARRAY_TOP == THREAD_ARRAY_SIZE) 
+                    {
+                        thread_map_extend(&thread_array);
+                    }
+                    thread_array[THREAD_ARRAY_TOP++] = thread_data;
+                    break;
+                }
+        }
+    }
     return 0;
 }
 
@@ -95,6 +167,27 @@ int wd_map_extend(struct chronofs_data *data) {
     return 0;
 }
 
+int thread_map_extend(struct watcher_thread **thread_array) 
+{
+    THREAD_ARRAY_SIZE *= 2;
+    struct watcher_thread *newArr = calloc(THREAD_ARRAY_SIZE, sizeof(struct watcher_thread));
+    if(newArr == NULL){
+        perror("Error while allocating memory during array extension\n");
+        return -1;
+    }
+    int old_top = THREAD_ARRAY_TOP;
+    THREAD_ARRAY_TOP = 0;
+    for (int i = 0; i < old_top; i++)
+    {
+        if((*thread_array)[i].active)
+        {
+            newArr[THREAD_ARRAY_TOP++] = (*thread_array)[i];
+        }
+    }
+    free(*thread_array);
+    *thread_array = newArr;
+    return 0;
+}
 int dfs(struct chronofs_data *data, char *curr_dir) {
     //open directory
     DIR *dirp = opendir(curr_dir);
@@ -382,4 +475,14 @@ int moveEvent(struct chronofs_data *data, time_t now, struct inotify_event *even
         fflush(data->log_file);
     }
     return 0;
+}
+void *watcher_worker(void *arg) 
+{
+    struct chronofs_data *data = arg;
+    printf("watcher thread spawned\n");
+    if(eventController(data) == -1){
+        perror("Exiting thread due to error\n");
+        return NULL;
+    }
+    return NULL;
 }
