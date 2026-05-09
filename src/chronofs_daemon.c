@@ -74,8 +74,10 @@ int deleteEvent(struct chronofs_data *data, time_t now, struct inotify_event *ev
 int modifyEvent(struct chronofs_data *data, time_t now, struct inotify_event *event);
 int moveEvent(struct chronofs_data *data, time_t now, struct inotify_event *event);
 
-// thread handler
+// thread handlers
 void *watcher_worker(void *arg);
+void cleanup_watcher(void *arg);
+
 int main()
 {
     struct watcher_thread *thread_array = calloc(THREAD_ARRAY_SIZE, sizeof(struct watcher_thread));
@@ -147,6 +149,27 @@ int main()
                         thread_map_extend(&thread_array);
                     }
                     thread_array[THREAD_ARRAY_TOP++] = thread_data;
+                    break;
+                case UNWATCH:
+                    bool deleted = false;
+                    for (int i = 0; i < THREAD_ARRAY_TOP; i++)
+                    {
+                        if(strcmp(thread_array[i].data->root, packet.path) == 0) 
+                        {
+                            deleted = true;
+                            pthread_cancel(thread_array[i].thread_id);
+                            fprintf(thread_array[i].data->log_file, "Detaching watcher\n");
+                            printf("Removing watcher thread for dir: %s\n", packet.path);
+                            thread_array[i] = thread_array[THREAD_ARRAY_TOP - 1];
+                            thread_array[THREAD_ARRAY_TOP].active = false;
+                            THREAD_ARRAY_TOP--;
+                            break;
+                        }
+                    }
+                    if(!deleted) 
+                    {
+                        printf("Directory not found to unwatch call\n");
+                    }
                     break;
                 }
         }
@@ -494,13 +517,24 @@ int moveEvent(struct chronofs_data *data, time_t now, struct inotify_event *even
     }
     return 0;
 }
+//closes files and file descriptors
+void cleanup_watcher(void *arg)
+{
+    struct chronofs_data *data = arg;
+    close(data->inotify_fd);
+    fclose(data->log_file);
+    free(data->wd_map);
+    free(data);
+}
 void *watcher_worker(void *arg) 
 {
     struct chronofs_data *data = arg;
     printf("watcher thread spawned\n");
-    if(eventController(data) == -1){
+    pthread_cleanup_push(cleanup_watcher, data);
+    if (eventController(data) == -1)
+    {
         perror("Exiting thread due to error\n");
-        return NULL;
     }
+    pthread_cleanup_pop(1);
     return NULL;
 }
