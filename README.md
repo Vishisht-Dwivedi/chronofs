@@ -1,6 +1,6 @@
 # ChronoFS
 
-A lightweight filesystem event tracking and snapshot daemon and listener written in C using Linux system primitives.
+A lightweight filesystem event tracking and snapshot daemon written in C using Linux system primitives.
 
 ChronoFS monitors directories recursively using `inotify`, tracks filesystem activity in realtime, and maintains threaded watchers through a Unix Domain Socket IPC architecture.
 
@@ -47,8 +47,22 @@ Each watched directory is assigned:
 ### Watch a directory
 
 ```bash
-chronofs watch /path/to/directory
+./build/chronofs_listener watch testdir
 ```
+
+### Remove watcher
+
+```bash
+./build/chronofs_listener unwatch testdir
+```
+
+### Create snapshot commit
+
+````bash
+./build/chronofs_listener commit testdir
+```bash
+chronofs watch /path/to/directory
+````
 
 ### Remove watcher
 
@@ -78,19 +92,45 @@ chronofs commit /path/to/directory
 ## Project Structure
 
 ```text
-src/
-    chronofs_daemon.c
-    chronofs.c
-
-build/
+.
+├── LICENSE
+├── README.md
+├── build
+│   ├── chronofs_daemon
+│   └── chronofs_listener
+├── current.log
+└── src
+    ├── chronofs_daemon.c
+    └── chronofs_listener.c
 ```
 
----
+### Components
+
+#### chronofs_daemon
+
+The background daemon process responsible for:
+
+* handling IPC connections
+* managing watcher threads
+* recursively attaching inotify watchers
+* logging filesystem events
+* processing watch/unwatch requests
+
+#### chronofs_listener
+
+A lightweight client utility that:
+
+* parses CLI commands
+* builds IPC packets
+* communicates with the daemon over Unix Domain Sockets
+* sends filesystem management requests
 
 ## Build
 
 ```bash
-gcc -Wall -Wextra -pthread -g src/*.c -o build/chronofs-daemon
+gcc -Wall -Wextra -pthread -g src/chronofs_daemon.c -o build/chronofs_daemon
+
+gcc -Wall -Wextra -pthread -g src/chronofs_listener.c -o build/chronofs_listener
 ```
 
 Or using VSCode tasks:
@@ -106,7 +146,7 @@ Ctrl + Shift + B
 ### Start daemon
 
 ```bash
-./build/chronofs-daemon
+./build/chronofs_daemon
 ```
 
 ### Watch a directory
