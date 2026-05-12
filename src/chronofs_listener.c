@@ -4,21 +4,7 @@
 #include <string.h>
 #include <sys/un.h>
 #include <unistd.h>
-#define SOCKET_NAME "/tmp/chronofs.socket"
-#define MAX_PATH_LENGTH 4096
-//defining packet struct
-struct chronofs_packet
-{
-    int type;
-    char path[MAX_PATH_LENGTH];
-};
-//request type enum
-enum request_type
-{
-    WATCH,
-    UNWATCH,
-    COMMIT
-};
+#include "common/protocol.h"
 
 int main(int argc, char *argv[]) {
     //if less than three arguments... exit
