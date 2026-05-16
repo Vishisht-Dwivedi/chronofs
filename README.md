@@ -16,7 +16,8 @@ ChronoFS monitors directories recursively using `inotify`, tracks filesystem act
 * Dynamic watcher registration/unregistration
 * Automatic recursive watcher expansion for newly created directories
 * Persistent activity logs
-* Snapshot-based commit system *(in progress)*
+* Snapshot-based commit system *
+* Rollback support (in progress) *
 
 ---
 
@@ -185,10 +186,9 @@ Implemented:
 * [x] Watch/unwatch operations
 * [x] Cleanup handlers
 * [x] Recursive directory discovery
+* [x] Snapshot commit system
 
 In Progress:
-
-* [ ] Snapshot commit system
 * [ ] Rollback support
 * [ ] Diff-based commits
 * [ ] Persistent commit metadata
