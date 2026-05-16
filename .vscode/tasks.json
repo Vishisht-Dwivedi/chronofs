@@ -4,7 +4,7 @@
         {
             "label": "build-all",
             "type": "shell",
-            "command": "mkdir -p build && gcc -Wall -Wextra -pthread -g ${workspaceFolder}/src/chronofs_daemon.c ${workspaceFolder}/src/common/utilities.c ${workspaceFolder}/src/fs/events.c ${workspaceFolder}/src/fs/watcher.c -o ${workspaceFolder}/build/chronofs_daemon && gcc -Wall -Wextra -pthread -g ${workspaceFolder}/src/chronofs_listener.c -o ${workspaceFolder}/build/chronofs_listener",
+            "command": "mkdir -p build && gcc -Wall -Wextra -pthread -g ${workspaceFolder}/src/chronofs_daemon.c ${workspaceFolder}/src/common/utilities.c ${workspaceFolder}/src/fs/events.c ${workspaceFolder}/src/fs/socket_events.c ${workspaceFolder}/src/fs/watcher.c -o ${workspaceFolder}/build/chronofs_daemon && gcc -Wall -Wextra -pthread -g ${workspaceFolder}/src/chronofs_listener.c -o ${workspaceFolder}/build/chronofs_listener",
             "group": {
                 "kind": "build",
                 "isDefault": true
