@@ -61,6 +61,7 @@ Each watched directory is assigned:
 
 ````bash
 ./build/chronofs_listener commit testdir
+```
 ```bash
 chronofs watch /path/to/directory
 ````
